@@ -90,15 +90,23 @@ export const PAYU_CONFIG = {
 } as const;
 
 export function getBaseApiUrl(): string {
-  if (typeof window !== 'undefined' && window.location?.origin?.includes(':4200')) {
-    return `${window.location.origin}/`;
+  if (typeof window !== 'undefined' && window.location) {
+    const host = window.location.hostname;
+    const origin = window.location.origin;
+    if (origin.includes(':4200') || host === 'localhost' || host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('172.') || /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+      return `${origin}/`;
+    }
   }
   return BILLMEX_LIVE_CONFIG.baseApiUrl;
 }
 
 export function getRmsBaseUrl(directUrl?: string): string {
-  if (typeof window !== 'undefined' && window.location?.origin?.includes(':4200')) {
-    return `${window.location.origin}/bhojrms/`;
+  if (typeof window !== 'undefined' && window.location) {
+    const host = window.location.hostname;
+    const origin = window.location.origin;
+    if (origin.includes(':4200') || host === 'localhost' || host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('172.') || /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+      return `${origin}/bhojrms/`;
+    }
   }
   return directUrl || BILLMEX_LIVE_CONFIG.rmsBaseUrl;
 }

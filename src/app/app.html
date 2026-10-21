@@ -659,37 +659,68 @@
       </div>
 
       <!-- Dynamic Filter Categories Chips (Menu Categories) -->
-      <nav aria-label="Category filters" class="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
-        @for (cat of categories(); track cat.id) {
-          <button 
-            type="button"
-            (click)="setCategory(cat.id)"
-            [class.bg-gradient-to-r]="activeCategory() === cat.id"
-            [class.from-[#0284c7]]="activeCategory() === cat.id"
-            [class.to-[#0ea5e9]]="activeCategory() === cat.id"
-            [class.border-cyan-400]="activeCategory() === cat.id"
-            [class.text-white]="activeCategory() === cat.id"
-            [class.shadow-[0_0_15px_rgba(14,165,233,0.4)]]="activeCategory() === cat.id"
-            [class.bg-[#0a1220]]="activeCategory() !== cat.id"
-            [class.border-slate-800]="activeCategory() !== cat.id"
-            [class.text-slate-300]="activeCategory() !== cat.id"
-            class="shrink-0 px-3.5 py-1.5 rounded-full border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer hover:border-cyan-500/50 whitespace-nowrap active:scale-95 shadow-sm">
-            @if (cat.icon) {
-              <span [class.text-cyan-200]="activeCategory() === cat.id" [class.text-cyan-400]="activeCategory() !== cat.id && cat.id === 'all'" [class.text-emerald-400]="cat.id === 'specials'">
-                {{ cat.icon }}
-              </span>
-            }
-            <span>{{ cat.name }}</span>
-            <span class="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-medium"
-              [class.bg-white/20]="activeCategory() === cat.id"
+      <div class="relative w-full flex items-center gap-1">
+        <!-- Left Scroll Control Arrow -->
+        <button 
+          type="button"
+          (click)="scrollCategoryNav(-180)"
+          aria-label="Scroll categories left"
+          class="shrink-0 w-7 h-7 rounded-full bg-[#081220]/95 hover:bg-[#0f1f38] border border-cyan-500/50 text-cyan-300 flex items-center justify-center text-sm font-bold shadow-[0_0_10px_rgba(6,182,212,0.2)] cursor-pointer active:scale-90 transition-all z-10">
+          ‹
+        </button>
+
+        <!-- Category Nav Pill Container with Mouse Drag & Mobile Touch Pan -->
+        <nav 
+          #categoryNav
+          id="category-nav-bar"
+          aria-label="Category filters"
+          (wheel)="onNavWheel($event)"
+          (mousedown)="onNavMouseDown($event, categoryNav)"
+          (mousemove)="onNavMouseMove($event, categoryNav)"
+          (mouseup)="onNavMouseUp()"
+          (mouseleave)="onNavMouseUp()"
+          class="flex-1 min-w-0 flex items-center gap-2 overflow-x-auto no-scrollbar py-1 scroll-smooth cursor-grab active:cursor-grabbing select-none"
+          style="touch-action: pan-x; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;">
+          @for (cat of categories(); track cat.id) {
+            <button 
+              type="button"
+              (click)="setCategory(cat.id, $event)"
+              [class.bg-gradient-to-r]="activeCategory() === cat.id"
+              [class.from-[#0284c7]]="activeCategory() === cat.id"
+              [class.to-[#0ea5e9]]="activeCategory() === cat.id"
+              [class.border-cyan-400]="activeCategory() === cat.id"
               [class.text-white]="activeCategory() === cat.id"
-              [class.bg-slate-800/80]="activeCategory() !== cat.id"
-              [class.text-slate-400]="activeCategory() !== cat.id">
-              {{ cat.count }}
-            </span>
-          </button>
-        }
-      </nav>
+              [class.shadow-[0_0_15px_rgba(14,165,233,0.4)]]="activeCategory() === cat.id"
+              [class.bg-[#0a1220]]="activeCategory() !== cat.id"
+              [class.border-slate-800]="activeCategory() !== cat.id"
+              [class.text-slate-300]="activeCategory() !== cat.id"
+              class="shrink-0 px-3.5 py-1.5 rounded-full border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer hover:border-cyan-500/50 whitespace-nowrap active:scale-95 shadow-sm">
+              @if (cat.icon) {
+                <span [class.text-cyan-200]="activeCategory() === cat.id" [class.text-cyan-400]="activeCategory() !== cat.id && cat.id === 'all'" [class.text-emerald-400]="cat.id === 'specials'">
+                  {{ cat.icon }}
+                </span>
+              }
+              <span>{{ cat.name }}</span>
+              <span class="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-medium"
+                [class.bg-white/20]="activeCategory() === cat.id"
+                [class.text-white]="activeCategory() === cat.id"
+                [class.bg-slate-800/80]="activeCategory() !== cat.id"
+                [class.text-slate-400]="activeCategory() !== cat.id">
+                {{ cat.count }}
+              </span>
+            </button>
+          }
+        </nav>
+
+        <!-- Right Scroll Control Arrow -->
+        <button 
+          type="button"
+          (click)="scrollCategoryNav(180)"
+          aria-label="Scroll categories right"
+          class="shrink-0 w-7 h-7 rounded-full bg-[#081220]/95 hover:bg-[#0f1f38] border border-cyan-500/50 text-cyan-300 flex items-center justify-center text-sm font-bold shadow-[0_0_10px_rgba(6,182,212,0.2)] cursor-pointer active:scale-90 transition-all z-10">
+          ›
+        </button>
+      </div>
 
       <!-- Category Header & Active Count -->
       <div class="flex items-center justify-between text-xs text-slate-400 px-0.5 pt-0.5">

@@ -49,11 +49,15 @@ describe('App', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
+    expect(fixture.componentInstance.totalCartCount()).toBe(0);
+    fixture.componentInstance.addToCart('chach-rayta');
+    fixture.componentInstance.addToCart('masala-chach');
+
     await fixture.componentInstance.confirmPayment();
 
     expect(fixture.componentInstance.orderPlacedSuccess()).toBe(true);
     expect(fixture.componentInstance.currentOrder()?.id).toBe('BH-9921');
-    expect(fixture.componentInstance.currentOrder()?.total).toBe(60);
+    expect(fixture.componentInstance.currentOrder()?.total).toBe(70);
     expect(fixture.componentInstance.orders()).toHaveLength(1);
     expect(fixture.componentInstance.notifications().length).toBeGreaterThan(1);
   });

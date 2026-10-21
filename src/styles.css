@@ -22,13 +22,18 @@ body {
     linear-gradient(to bottom, rgba(30, 58, 95, 0.22) 1px, transparent 1px);
 }
 
-/* Hide scrollbar for category filters */
+/* Hide scrollbar for category filters but ensure horizontal sliding works on mobile & touch */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-x !important;
+  scroll-behavior: smooth;
+  user-select: none;
 }
 
 /* Scanner beam animation */

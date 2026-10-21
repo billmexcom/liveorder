@@ -95,17 +95,14 @@ export class App implements OnInit, OnDestroy {
   apiError = signal<string | null>(null);
   apiLoading = signal(false);
 
-  // Cart Quantities Map: itemId -> quantity (Default matching screenshot: 1 Chach Rayta + 1 Masala Chach)
-  cartQuantities = signal<Record<string, number>>({
-    'chach-rayta': 1,
-    'masala-chach': 1
-  });
+  // Cart Quantities Map: itemId -> quantity (Starts completely empty for user to choose dishes)
+  cartQuantities = signal<Record<string, number>>({});
 
   // Checkout & Settlement States
   paymentMethod = signal<PaymentMethod>('upi');
   couponCode = signal<string>('NOCTURNE-10');
   discountAmount = signal<number>(10);
-  isCouponApplied = signal<boolean>(true);
+  isCouponApplied = signal<boolean>(false);
   isModifyingAddress = signal<boolean>(false);
   deliveryTerminal = signal<string>('Plot 42, Nanda Nagar, Sector 4, Indore, MP - 452011');
   invoiceEmail = signal<string>('9669660675@bhoj.com');
@@ -381,8 +378,57 @@ export class App implements OnInit, OnDestroy {
     this.showToast(type === 'delivery' ? '🛵 Switched to Delivery Mode' : '🛍 Switched to Takeaway Mode');
   }
 
-  setCategory(cat: string): void {
+  isDraggingNav = false;
+  navStartX = 0;
+  navScrollLeft = 0;
+  hasNavMoved = false;
+
+  setCategory(cat: string, event?: Event): void {
+    if (this.hasNavMoved) {
+      this.hasNavMoved = false;
+      return;
+    }
     this.activeCategory.set(cat);
+    if (event?.currentTarget) {
+      const target = event.currentTarget as HTMLElement;
+      target.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }
+
+  scrollCategoryNav(offset: number): void {
+    const nav = document.getElementById('category-nav-bar');
+    if (nav) {
+      nav.scrollBy({ left: offset, behavior: 'smooth' });
+    }
+  }
+
+  onNavWheel(e: WheelEvent): void {
+    const nav = document.getElementById('category-nav-bar');
+    if (nav) {
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      nav.scrollLeft += delta;
+    }
+  }
+
+  onNavMouseDown(e: MouseEvent, nav: HTMLElement): void {
+    this.isDraggingNav = true;
+    this.hasNavMoved = false;
+    this.navStartX = e.pageX - nav.offsetLeft;
+    this.navScrollLeft = nav.scrollLeft;
+  }
+
+  onNavMouseMove(e: MouseEvent, nav: HTMLElement): void {
+    if (!this.isDraggingNav) return;
+    const x = e.pageX - nav.offsetLeft;
+    const walk = (x - this.navStartX) * 1.5;
+    if (Math.abs(walk) > 4) {
+      this.hasNavMoved = true;
+    }
+    nav.scrollLeft = this.navScrollLeft - walk;
+  }
+
+  onNavMouseUp(): void {
+    this.isDraggingNav = false;
   }
 
   getActiveCategoryName(): string {
@@ -427,9 +473,17 @@ export class App implements OnInit, OnDestroy {
     this.cartQuantities.set(quantities);
   }
 
-  addToCart(item: MenuItem): void {
-    this.updateItemQuantity(item, 1);
-    this.showToast(`Added ${item.name} to cart`);
+  addToCart(itemOrId: MenuItem | string): void {
+    let item: MenuItem | undefined;
+    if (typeof itemOrId === 'string') {
+      item = this.menuItems().find((i) => i.id === itemOrId) || getMockMenuItems().find((i) => i.id === itemOrId);
+    } else {
+      item = itemOrId;
+    }
+    if (item) {
+      this.updateItemQuantity(item, 1);
+      this.showToast(`Added ${item.name} to cart`);
+    }
   }
 
   async likeItem(item: MenuItem): Promise<void> {
@@ -745,9 +799,12 @@ export class App implements OnInit, OnDestroy {
   private async loadInitialData(): Promise<void> {
     try {
       let posId = 'POS-DEMO';
-      if (typeof window !== 'undefined' && window.location && (window.location.port === '4200' || window.location.search.includes('posId'))) {
-        const params = new URLSearchParams(window.location.search);
-        posId = params.get('posId') || BILLMEX_LIVE_CONFIG.defaultPosId;
+      if (typeof window !== 'undefined' && window.location) {
+        const isLiveHost = window.location.port === '4200' || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname) || window.location.search.includes('posId');
+        if (isLiveHost) {
+          const params = new URLSearchParams(window.location.search);
+          posId = params.get('posId') || BILLMEX_LIVE_CONFIG.defaultPosId;
+        }
       }
       const posData = await this.api.getPosData(posId);
       if (posData?.name && posData.name !== 'Grand Bay Bistro') {
