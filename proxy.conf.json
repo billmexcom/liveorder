@@ -1,0 +1,12 @@
+{
+  "/bhojmain": {
+    "target": "http://billmex.in:8080",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/bhojrms": {
+    "target": "https://rms.billmex.com",
+    "secure": false,
+    "changeOrigin": true
+  }
+}

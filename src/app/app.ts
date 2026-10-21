@@ -1,36 +1,32 @@
 import { Component, signal, computed, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import {
+  BillmexMockApi,
+  BILLMEX_LIVE_CONFIG,
+  type BillmexNotification,
+  type BillmexOrder,
+  type Customer,
+  type MenuItem,
+  type OrderType,
+  type PaymentMethod,
+  getMockMenuItems,
+} from './billmex-api';
 
 type Language = 'EN' | 'HI';
 type AppView = 'login' | 'menu' | 'checkout' | 'orders' | 'explore' | 'profile';
-type OrderType = 'delivery' | 'takeaway';
-type Category = 'all' | 'chef' | 'specials';
-type PaymentMethod = 'upi' | 'cod';
-
-export interface MenuItem {
+export interface MenuCategoryTab {
   id: string;
   name: string;
-  nameHi: string;
-  tag?: string;
-  tagType?: 'bestseller' | 'discount';
-  discount?: string;
-  description: string;
-  descriptionHi: string;
-  price: number;
-  originalPrice?: number;
-  likes: number;
-  reviews?: number;
-  rating: number;
-  imageUrl: string;
-  category: ('all' | 'chef' | 'specials')[];
-  isVeg: boolean;
+  count: number;
+  icon?: string;
+  isSpecial?: boolean;
 }
 
 export interface CartItem {
   item: MenuItem;
   quantity: number;
-  customization?: string;
+  lineTotal: number;
 }
 
 @Component({
@@ -54,7 +50,7 @@ export class App implements OnInit, OnDestroy {
   orderType = signal<OrderType>('delivery');
 
   // Category Filter
-  activeCategory = signal<Category>('all');
+  activeCategory = signal<string>('all');
 
   // Diner Details State (carried across screens)
   userName = signal<string>('Vishnu');
@@ -66,6 +62,9 @@ export class App implements OnInit, OnDestroy {
   // Passcode 4 digits for Login screen
   passcode = signal<string[]>(['4', '8', '2', '9']);
   isAutoFilled = signal<boolean>(true);
+
+  otpSent = signal<boolean>(false);
+  otpSending = signal<boolean>(false);
 
   // Scanner States
   isTorchOn = signal<boolean>(false);
@@ -86,94 +85,15 @@ export class App implements OnInit, OnDestroy {
   showCustomizeModal = signal<boolean>(false);
   selectedCustomizeItem = signal<MenuItem | null>(null);
 
-  // Menu Items Database
-  menuItems = signal<MenuItem[]>([
-    {
-      id: 'chach-rayta',
-      name: 'Chach Rayta',
-      nameHi: 'छाछ रायता',
-      tag: 'BESTSELLER',
-      tagType: 'bestseller',
-      description: 'Rich artisanal curd churned with hand-ground Himalayan rock salt & cracked cumin.',
-      descriptionHi: 'हाथ से पिसे हिमालयन सेंधा नमक और भुने जीरे के साथ मथा हुआ स्वादिष्ट दही।',
-      price: 30,
-      likes: 142,
-      reviews: 28,
-      rating: 4.9,
-      imageUrl: '/images/chach_rayta.jpg',
-      category: ['all', 'chef', 'specials'],
-      isVeg: true
-    },
-    {
-      id: 'dahi-plain',
-      name: 'Dahi Plain',
-      nameHi: 'दही प्लेन (मटका)',
-      description: 'Slow-fermented buffalo milk curd set in authentic clay pots with velvety texture.',
-      descriptionHi: 'पारंपरिक मिट्टी की हांडी में जमाया हुआ मलाईदार शुद्ध भैंस का गाढ़ा दही।',
-      price: 60,
-      likes: 89,
-      rating: 4.7,
-      imageUrl: '/images/dahi_plain.jpg',
-      category: ['all'],
-      isVeg: true
-    },
-    {
-      id: 'masala-chach',
-      name: 'Masala Chach',
-      nameHi: 'मसाला छाछ',
-      description: 'Roasted cumin & young ginger digestive buttermilk infused with fresh mint.',
-      descriptionHi: 'भुना जीरा, बारीक अदरक और ताजे पुदीने से भरपूर पाचक देशी छाछ।',
-      price: 40,
-      likes: 204,
-      rating: 4.8,
-      imageUrl: '/images/masala_chach.jpg',
-      category: ['all', 'chef'],
-      isVeg: true
-    },
-    {
-      id: 'veg-rayta',
-      name: 'Veg Rayta',
-      nameHi: 'मिक्स वेज रायता',
-      description: 'Crisp boondi, finely diced garden cucumber, and vine tomatoes tossed in spiced curd.',
-      descriptionHi: 'कुरकुरी बूंदी, बारीक खीरा और रसीले टमाटरों से सजा हुआ चटपटा रायता।',
-      price: 80,
-      likes: 76,
-      rating: 4.6,
-      imageUrl: '/images/veg_rayta.jpg',
-      category: ['all'],
-      isVeg: true
-    },
-    {
-      id: 'paneer-butter-masala',
-      name: 'Paneer Butter Masala',
-      nameHi: 'पनीर बटर मसाला',
-      tag: '15% OFF',
-      tagType: 'discount',
-      discount: '15% OFF',
-      description: 'Tender fresh malai paneer simmered in silky tomato-cashew satin gravy with cream.',
-      descriptionHi: 'रेशमी टमाटर और काजू की मखमली ग्रेवी में ताजे मलाई पनीर के टुकड़े।',
-      price: 180,
-      originalPrice: 210,
-      likes: 342,
-      rating: 4.9,
-      imageUrl: '/images/paneer_butter_masala.jpg',
-      category: ['all', 'chef', 'specials'],
-      isVeg: true
-    },
-    {
-      id: 'dal-tadka',
-      name: 'Dal Tadka Double Jeera',
-      nameHi: 'दाल तड़का डबल जीरा',
-      description: 'Yellow lentils double-tempered in pure desi ghee, crushed garlic, and Kashmiri chili.',
-      descriptionHi: 'शुद्ध देशी घी, भुने लहसुन और कश्मीरी लाल मिर्च के दोहरे तड़के वाली अरहर दाल।',
-      price: 120,
-      likes: 118,
-      rating: 4.7,
-      imageUrl: '/images/dal_tadka.jpg',
-      category: ['all', 'specials'],
-      isVeg: true
-    }
-  ]);
+  isLiveConnected = signal<boolean>(false);
+  demoMode = computed(() => !this.isLiveConnected());
+  menuItems = signal<MenuItem[]>(getMockMenuItems());
+  orders = signal<BillmexOrder[]>([]);
+  notifications = signal<BillmexNotification[]>([]);
+  customer = signal<Customer | null>(null);
+  currentOrder = signal<BillmexOrder | null>(null);
+  apiError = signal<string | null>(null);
+  apiLoading = signal(false);
 
   // Cart Quantities Map: itemId -> quantity (Default matching screenshot: 1 Chach Rayta + 1 Masala Chach)
   cartQuantities = signal<Record<string, number>>({
@@ -190,9 +110,71 @@ export class App implements OnInit, OnDestroy {
   deliveryTerminal = signal<string>('Plot 42, Nanda Nagar, Sector 4, Indore, MP - 452011');
   invoiceEmail = signal<string>('9669660675@bhoj.com');
   orderPlacedSuccess = signal<boolean>(false);
+  lastPlacedOrderTotal = signal<number>(0);
 
   // Menu Search Query
   searchQuery = signal<string>('');
+
+  // Dynamic Menu Categories derived from loaded menu items
+  categories = computed<MenuCategoryTab[]>(() => {
+    const items = this.menuItems();
+    const isHi = this.currentLang() === 'HI';
+    const result: MenuCategoryTab[] = [
+      { id: 'all', name: isHi ? 'सभी व्यंजन' : 'All Items', count: items.length, icon: '•' },
+    ];
+
+    const chefCount = items.filter((i) => i.category.includes('chef') || i.saifRecommended).length;
+    if (chefCount > 0) {
+      result.push({
+        id: 'chef',
+        name: isHi ? 'शेफ की पसंद' : 'Chef Recommended',
+        count: chefCount,
+        icon: '👨‍🍳',
+        isSpecial: true,
+      });
+    }
+
+    const specialsCount = items.filter((i) => i.category.includes('specials') || i.todaySpecial).length;
+    if (specialsCount > 0) {
+      result.push({
+        id: 'specials',
+        name: isHi ? 'आज का स्पेशल' : "Today's Special",
+        count: specialsCount,
+        icon: '✪',
+        isSpecial: true,
+      });
+    }
+
+    const bestsellerCount = items.filter((i) => i.category.includes('bestseller') || i.bestSeller).length;
+    if (bestsellerCount > 0) {
+      result.push({
+        id: 'bestseller',
+        name: isHi ? 'बेस्ट सेलर' : 'Best Seller',
+        count: bestsellerCount,
+        icon: '🔥',
+        isSpecial: true,
+      });
+    }
+
+    // Collect all unique categories from the loaded menu items
+    const catCounts = new Map<string, number>();
+    for (const item of items) {
+      const name = item.categoryName || item.category.find((c) => !['all', 'chef', 'specials', 'bestseller'].includes(c));
+      if (name && name !== 'UnCategorized Item Master' && name !== 'General') {
+        catCounts.set(name, (catCounts.get(name) || 0) + 1);
+      }
+    }
+
+    for (const [name, count] of catCounts.entries()) {
+      result.push({
+        id: name,
+        name: name,
+        count: count,
+      });
+    }
+
+    return result;
+  });
 
   // Filtered Menu Items
   filteredItems = computed(() => {
@@ -200,7 +182,22 @@ export class App implements OnInit, OnDestroy {
     const query = this.searchQuery().trim().toLowerCase();
 
     return this.menuItems().filter((item) => {
-      const matchesCategory = cat === 'all' || item.category.includes(cat);
+      let matchesCategory = false;
+      if (cat === 'all') {
+        matchesCategory = true;
+      } else if (cat === 'chef') {
+        matchesCategory = item.category.includes('chef') || !!item.saifRecommended;
+      } else if (cat === 'specials') {
+        matchesCategory = item.category.includes('specials') || !!item.todaySpecial;
+      } else if (cat === 'bestseller') {
+        matchesCategory = item.category.includes('bestseller') || !!item.bestSeller;
+      } else {
+        matchesCategory =
+          item.category.includes(cat) ||
+          item.categoryName === cat ||
+          item.subCategoryName === cat;
+      }
+
       if (!matchesCategory) return false;
 
       if (!query) return true;
@@ -212,27 +209,57 @@ export class App implements OnInit, OnDestroy {
     });
   });
 
+  // Active Cart Items with normalized resolution across live RMS & mock IDs
+  cartItems = computed<CartItem[]>(() => {
+    const quantities = this.cartQuantities();
+    const items = this.menuItems();
+    const mockItems = getMockMenuItems();
+    const list: CartItem[] = [];
+
+    const clean = (s: string) => s.toLowerCase().replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    for (const [key, qty] of Object.entries(quantities)) {
+      if (qty <= 0) continue;
+      // 1. Exact ID / Bean ID match in loaded items
+      let item = items.find((i) => i.id === key || i.itemBeanId === key || i.itemMasterId === key);
+      // 2. Normalized name match in loaded items
+      if (!item) {
+        const cleanedKey = clean(key);
+        item = items.find((i) => {
+          const cleanedName = clean(i.name);
+          return cleanedName === cleanedKey || cleanedName.includes(cleanedKey) || cleanedKey.includes(cleanedName);
+        });
+      }
+      // 3. Fallback to mock items (for offline / unit test suite)
+      if (!item) {
+        item = mockItems.find((i) => i.id === key);
+      }
+      if (item) {
+        list.push({
+          item,
+          quantity: qty,
+          lineTotal: item.price * qty,
+        });
+      }
+    }
+    return list;
+  });
+
   // Total Cart Items Count
   totalCartCount = computed(() => {
-    const quantities = this.cartQuantities();
-    return Object.values(quantities).reduce((acc, qty) => acc + qty, 0);
+    return this.cartItems().reduce((acc, ci) => acc + ci.quantity, 0);
   });
 
   // Total Cart Price (Subtotal)
   totalCartPrice = computed(() => {
-    const quantities = this.cartQuantities();
-    let total = 0;
-    for (const item of this.menuItems()) {
-      const qty = quantities[item.id] || 0;
-      total += item.price * qty;
-    }
-    return total;
+    return this.cartItems().reduce((acc, ci) => acc + ci.lineTotal, 0);
   });
 
   // Grand Total after discount
   grandTotal = computed(() => {
     const subtotal = this.totalCartPrice();
-    const discount = this.isCouponApplied() ? this.discountAmount() : 0;
+    if (subtotal <= 0) return 0;
+    const discount = this.isCouponApplied() ? Math.min(this.discountAmount(), subtotal) : 0;
     return Math.max(0, subtotal - discount);
   });
 
@@ -310,6 +337,7 @@ export class App implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.startTimer();
+    void this.loadInitialData();
   }
 
   ngOnDestroy(): void {
@@ -334,11 +362,13 @@ export class App implements OnInit, OnDestroy {
     if (view === 'explore' || view === 'menu' || view === 'orders' || view === 'profile') {
       this.activeNavTab.set(view);
     }
+    void this.loadViewData(view);
   }
 
   setNavTab(tab: 'explore' | 'menu' | 'orders' | 'profile'): void {
     this.activeNavTab.set(tab);
     this.activeView.set(tab);
+    void this.loadViewData(tab);
   }
 
   signOut(): void {
@@ -351,36 +381,79 @@ export class App implements OnInit, OnDestroy {
     this.showToast(type === 'delivery' ? '🛵 Switched to Delivery Mode' : '🛍 Switched to Takeaway Mode');
   }
 
-  setCategory(cat: Category): void {
+  setCategory(cat: string): void {
     this.activeCategory.set(cat);
   }
 
+  getActiveCategoryName(): string {
+    const active = this.activeCategory();
+    const found = this.categories().find((c) => c.id === active);
+    return found ? found.name : active;
+  }
+
   getItemQuantity(itemId: string): number {
-    return this.cartQuantities()[itemId] || 0;
+    const quantities = this.cartQuantities();
+    if (quantities[itemId] !== undefined) return quantities[itemId];
+    const ci = this.cartItems().find(
+      (c) => c.item.id === itemId || c.item.itemBeanId === itemId || c.item.itemMasterId === itemId
+    );
+    return ci ? ci.quantity : 0;
+  }
+
+  updateItemQuantity(item: MenuItem, delta: number): void {
+    const quantities = { ...this.cartQuantities() };
+    let matchedKey = item.id;
+    if (quantities[matchedKey] === undefined) {
+      const clean = (s: string) => s.toLowerCase().replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+      const cleanTarget = clean(item.name);
+      for (const k of Object.keys(quantities)) {
+        if (clean(k) === cleanTarget || cleanTarget.includes(clean(k))) {
+          matchedKey = k;
+          break;
+        }
+      }
+    }
+
+    const current = quantities[matchedKey] || 0;
+    const next = current + delta;
+    if (next <= 0) {
+      delete quantities[matchedKey];
+      delete quantities[item.id];
+      this.showToast(`Removed ${item.name} from cart`);
+    } else {
+      delete quantities[matchedKey];
+      quantities[item.id] = next;
+    }
+    this.cartQuantities.set(quantities);
   }
 
   addToCart(item: MenuItem): void {
-    const quantities = { ...this.cartQuantities() };
-    quantities[item.id] = (quantities[item.id] || 0) + 1;
-    this.cartQuantities.set(quantities);
+    this.updateItemQuantity(item, 1);
     this.showToast(`Added ${item.name} to cart`);
   }
 
+  async likeItem(item: MenuItem): Promise<void> {
+    try {
+      const result = await this.api.likeMasterBean(item.id);
+      this.menuItems.update((items) =>
+        items.map((candidate) => candidate.id === item.id ? { ...candidate, likes: result.likes } : candidate),
+      );
+    } catch (error) {
+      this.reportApiError(error);
+    }
+  }
+
   incrementQuantity(item: MenuItem): void {
-    const quantities = { ...this.cartQuantities() };
-    quantities[item.id] = (quantities[item.id] || 0) + 1;
-    this.cartQuantities.set(quantities);
+    this.updateItemQuantity(item, 1);
   }
 
   decrementQuantity(item: MenuItem): void {
-    const quantities = { ...this.cartQuantities() };
-    const current = quantities[item.id] || 0;
-    if (current > 1) {
-      quantities[item.id] = current - 1;
-    } else {
-      delete quantities[item.id];
-    }
-    this.cartQuantities.set(quantities);
+    this.updateItemQuantity(item, -1);
+  }
+
+  clearCart(): void {
+    this.cartQuantities.set({});
+    this.showToast('Cart cleared');
   }
 
   openCustomize(item: MenuItem): void {
@@ -426,15 +499,68 @@ export class App implements OnInit, OnDestroy {
     }
   }
 
-  confirmPayment(): void {
-    this.orderPlacedSuccess.set(true);
-    this.showToast('🎉 Settlement Authorized! Live Telemetry Active.');
+  async confirmPayment(): Promise<void> {
+    if (this.apiLoading()) return;
+    const items = this.cartItems().map((ci) => ({
+      itemId: ci.item.id,
+      quantity: ci.quantity
+    }));
+    if (items.length === 0) {
+      this.showToast('⚠️ Please add at least 1 item to cart.');
+      return;
+    }
+    const customerId = this.customer()?.customerId ?? 'customer-1';
+    this.apiLoading.set(true);
+    this.apiError.set(null);
+
+    try {
+      const order = await this.api.placeOrder({
+        customerId,
+        items,
+        paymentMethod: this.paymentMethod(),
+        orderType: this.orderType(),
+        couponCode: this.isCouponApplied() ? this.couponCode() : '',
+        tableCode: this.tableCode(),
+        deliveryAddress: this.deliveryTerminal(),
+      });
+
+      if (this.paymentMethod() === 'upi') {
+        const transaction = await this.api.initiateOrderTransaction(order.total, order.id);
+        await this.api.updateTransactionStatus(transaction.transactionId);
+      }
+
+      const finalTotal = order.total || this.grandTotal();
+      this.lastPlacedOrderTotal.set(finalTotal);
+      this.currentOrder.set(await this.api.getOrderById(order.id));
+      await this.refreshOrders();
+      await this.refreshNotifications();
+      this.orderPlacedSuccess.set(true);
+      this.cartQuantities.set({});
+
+      const isLive = !order.id.startsWith('BH-');
+      this.showToast(isLive ? `🎉 Order #${order.id.slice(-6).toUpperCase()} placed with kitchen!` : `Order #${order.id} confirmed!`);
+    } catch (error) {
+      this.reportApiError(error);
+    } finally {
+      this.apiLoading.set(false);
+    }
   }
 
   closeOrderSuccess(): void {
     this.orderPlacedSuccess.set(false);
     this.activeNavTab.set('orders');
     this.activeView.set('orders');
+    void this.loadViewData('orders');
+  }
+
+  getOrderItemName(itemId: string): string {
+    const item = this.menuItems().find((candidate) => candidate.id === itemId || candidate.itemBeanId === itemId || candidate.itemMasterId === itemId);
+    return item?.name ?? 'Dish item';
+  }
+
+  getOrderItemPrice(itemId: string): number {
+    const item = this.menuItems().find((candidate) => candidate.id === itemId || candidate.itemBeanId === itemId || candidate.itemMasterId === itemId);
+    return item?.price ?? 0;
   }
 
   placeOrder(): void {
@@ -474,16 +600,65 @@ export class App implements OnInit, OnDestroy {
     }, 1000);
   }
 
-  resendOtp(): void {
-    if (this.resendSeconds() === 0) {
+  onPhoneChange(val: string): void {
+    const cleaned = val.replace(/\D/g, '').slice(0, 10);
+    this.phoneNumber.set(cleaned);
+    if (this.otpSent()) {
+      this.otpSent.set(false);
+    }
+  }
+
+  fillDemoOtp(): void {
+    this.passcode.set(['4', '8', '2', '9']);
+    this.isAutoFilled.set(true);
+    this.showToast('Demo OTP 4829 filled.');
+  }
+
+  clearOtp(): void {
+    this.passcode.set(['', '', '', '']);
+    this.isAutoFilled.set(false);
+    const firstInput = document.getElementById('otp-input-0') as HTMLInputElement;
+    if (firstInput) firstInput.focus();
+  }
+
+  async sendOtp(): Promise<void> {
+    const phone = this.phoneNumber().trim();
+    if (!/^\d{10}$/.test(phone)) {
+      this.showToast('⚠️ Please enter a valid 10-digit mobile number.');
+      return;
+    }
+    const name = this.userName().trim() || 'Guest Diner';
+    this.otpSending.set(true);
+    this.apiError.set(null);
+    try {
+      await this.api.customerSimreg(phone, name);
+      this.otpSent.set(true);
       this.resendSeconds.set(45);
       this.startTimer();
-      this.showToast('📩 New 4-digit OTP dispatched to +91 ' + this.phoneNumber());
+      if (this.api.isLiveConnected) {
+        this.showToast(`✅ Live OTP sent to +91 ${phone}`);
+      } else {
+        this.showToast(`Demo OTP is 4829. Sent to +91 ${phone}`);
+      }
+      setTimeout(() => {
+        const firstInput = document.getElementById('otp-input-0') as HTMLInputElement;
+        if (firstInput) firstInput.focus();
+      }, 150);
+    } catch (err: any) {
+      this.reportApiError(err);
+    } finally {
+      this.otpSending.set(false);
+    }
+  }
+
+  resendOtp(): void {
+    if (this.resendSeconds() === 0) {
+      void this.requestResendOtp();
     }
   }
 
   sendWhatsAppOtp(): void {
-    this.showToast('💬 OTP sent to your WhatsApp number!');
+    void this.sendOtp();
   }
 
   handleDigitInput(event: any, index: number): void {
@@ -519,14 +694,34 @@ export class App implements OnInit, OnDestroy {
     }
   }
 
-  confirmAndOpenMenu(): void {
-    this.showSuccessModal.set(false);
-    this.activeView.set('menu');
-    this.showToast('✨ Welcome to Grand Bay Bistro Digital Menu!');
+  async confirmAndOpenMenu(): Promise<void> {
+    if (this.apiLoading()) return;
+    this.apiLoading.set(true);
+    this.apiError.set(null);
+    try {
+      const customer = await this.api.customerVotp(
+        this.phoneNumber(),
+        this.passcode().join(''),
+        this.userName(),
+      );
+      this.customer.set(customer);
+      this.userName.set(customer.name);
+      await this.api.getCustomerInfoById(customer.customerId);
+      await this.api.registerPushToken(customer.customerId, 'demo-fcm-token');
+      this.showSuccessModal.set(false);
+      this.activeView.set('menu');
+      this.activeNavTab.set('menu');
+      this.showToast('Welcome to Grand Bay Bistro. Demo session verified.');
+    } catch (error) {
+      this.reportApiError(error);
+    } finally {
+      this.apiLoading.set(false);
+    }
   }
 
   guestCheckout(): void {
     this.activeView.set('menu');
+    this.activeNavTab.set('menu');
     this.showToast('🚀 Proceeding as Guest on Table ' + this.tableCode());
   }
 
@@ -546,4 +741,91 @@ export class App implements OnInit, OnDestroy {
       }
     }, 3000);
   }
+
+  private async loadInitialData(): Promise<void> {
+    try {
+      let posId = 'POS-DEMO';
+      if (typeof window !== 'undefined' && window.location && (window.location.port === '4200' || window.location.search.includes('posId'))) {
+        const params = new URLSearchParams(window.location.search);
+        posId = params.get('posId') || BILLMEX_LIVE_CONFIG.defaultPosId;
+      }
+      const posData = await this.api.getPosData(posId);
+      if (posData?.name && posData.name !== 'Grand Bay Bistro') {
+        this.tableName.set(posData.name);
+      }
+      this.isLiveConnected.set(this.api.isLiveConnected);
+      await this.loadMenu();
+      this.isLiveConnected.set(this.api.isLiveConnected);
+      await this.refreshOrders();
+      await this.refreshNotifications();
+    } catch (error) {
+      this.reportApiError(error);
+    }
+  }
+
+  private async loadViewData(view: AppView): Promise<void> {
+    try {
+      if (view === 'menu' || view === 'explore') await this.loadMenu();
+      if (view === 'orders') {
+        await this.refreshOrders();
+        const latestOrder = this.orders()[0];
+        this.currentOrder.set(latestOrder ? await this.api.getOrderById(latestOrder.id) : null);
+      }
+      if (view === 'profile') {
+        await this.refreshNotifications();
+        const customer = this.customer();
+        if (customer) this.customer.set(await this.api.getCustomerInfoById(customer.customerId));
+      }
+    } catch (error) {
+      this.reportApiError(error);
+    }
+  }
+
+  private async loadMenu(): Promise<void> {
+    this.menuItems.set(await this.api.getItemMaster());
+  }
+
+  private async refreshOrders(): Promise<void> {
+    this.orders.set(await this.api.getOrderHistory(this.customer()?.customerId ?? 'customer-1'));
+  }
+
+  private async refreshNotifications(): Promise<void> {
+    this.notifications.set(await this.api.getNotifications());
+  }
+
+  private async requestOtp(): Promise<void> {
+    try {
+      await this.api.customerSimreg(this.phoneNumber(), this.userName());
+      if (this.api.isLiveConnected) {
+        this.showToast('✅ Live OTP sent to ' + this.phoneNumber());
+      } else {
+        this.showToast('Demo OTP is 4829. No SMS was sent.');
+      }
+    } catch (error) {
+      this.reportApiError(error);
+    }
+  }
+
+  private async requestResendOtp(): Promise<void> {
+    try {
+      await this.api.resendOtp(this.phoneNumber());
+      this.resendSeconds.set(45);
+      this.startTimer();
+      if (this.api.isLiveConnected) {
+        this.showToast('✅ Resent OTP to ' + this.phoneNumber());
+      } else {
+        this.showToast('Demo OTP is 4829. No SMS was sent.');
+      }
+    } catch (error) {
+      this.reportApiError(error);
+    }
+  }
+
+  private reportApiError(error: unknown): void {
+    const message = error instanceof Error ? error.message : 'The demo API request failed.';
+    this.apiError.set(message);
+    this.showToast(message);
+  }
+
+  constructor(private readonly api: BillmexMockApi) {}
 }
