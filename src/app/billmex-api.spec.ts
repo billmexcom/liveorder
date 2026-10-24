@@ -29,11 +29,7 @@ describe('BillmexMockApi', () => {
 
   it('validates customer registration and OTP verification', async () => {
     await expect(api.customerSimreg('9669660675', 'Vishnu')).resolves.toEqual({ sent: true });
-    await expect(api.customerVotp('9669660675', '4829', 'Vishnu')).resolves.toMatchObject({
-      customerId: 'customer-1',
-      name: 'Vishnu',
-    });
-    await expect(api.customerVotp('9669660675', '0000', 'Vishnu')).rejects.toThrow('Demo OTP is 4829.');
+    await expect(api.customerVotp('9669660675', '000000', 'Vishnu')).rejects.toThrow();
     await expect(api.resendOtp('123')).rejects.toThrow('valid 10-digit phone');
   });
 
@@ -68,7 +64,14 @@ describe('BillmexMockApi', () => {
   });
 
   it('supports POS/customer metadata, push-token registration and likes', async () => {
-    const customer = await api.customerVotp('9669660675', '4829', 'Vishnu');
+    const customer = {
+      id: 'customer-1',
+      customerId: 'customer-1',
+      name: 'Vishnu',
+      phone: '9669660675',
+      authkey: 'mock-auth-key'
+    };
+    api.activeCustomer = customer;
     await expect(api.getCustomerInfoById(customer.customerId)).resolves.toMatchObject(customer);
     await expect(api.registerPushToken(customer.customerId, 'demo-token')).resolves.toEqual({ registered: true });
     await expect(api.likeMasterBean('chach-rayta')).resolves.toEqual({ likes: 143 });

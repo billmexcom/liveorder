@@ -37,6 +37,8 @@ export interface OrderLine {
   quantity: number;
   name?: string;
   price?: number;
+  spiceLevel?: 'Normal' | 'Medium' | 'Spicy';
+  remark?: string;
 }
 
 export interface Customer {
@@ -115,7 +117,7 @@ export const BILLMEX_API_ROUTES = {
   posData: '/bhojmain/app/pos/posData/{posId}',
   customerRegistration: '/bhojmain/app/customer/simreg/',
   verifyOtp: '/bhojmain/app/customer/votp',
-  resendOtp: '/bhojmain/app/customer/resendOtp/{phone}',
+  resendOtp: '/bhojmain/app/customer/resendOtp/{customerId}',
   customerInfo: '/bhojmain/app/customer/getCustomerInfoById/{customerId}',
   pushToken: '/bhojmain/app/pos/{posId}?customerId={customerId}',
   itemMaster: '/bhoj/itemMaster/{posId}',
@@ -318,7 +320,7 @@ export class BillmexMockApi {
 
   constructor(@Optional() private readonly http?: HttpClient) {}
 
-  async getPosData(posId: string): Promise<{ posId: string; name: string; publicUrl: string }> {
+  async getPosData(posId: string = BILLMEX_LIVE_CONFIG.defaultPosId): Promise<{ posId: string; name: string; publicUrl: string }> {
     if (this.http && posId !== 'POS-DEMO') {
       try {
         const url = `${getBaseApiUrl()}bhojmain/app/pos/posData/${posId}`;
@@ -340,15 +342,15 @@ export class BillmexMockApi {
     return { posId, name: 'Grand Bay Bistro', publicUrl: 'mock://pos/' };
   }
 
-  async customerSimreg(phone: string, name: string): Promise<{ sent: boolean; customerId?: string }> {
+  async customerSimreg(phone: string, name?: string): Promise<{ sent: boolean; customerId?: string }> {
     this.validatePhone(phone);
-    if (!name.trim()) throw new Error('Enter your name before requesting an OTP.');
+    const cleanName = (name || '').trim() || 'Guest Diner';
 
     if (this.http) {
       try {
         const url = `${getBaseApiUrl()}bhojmain/app/customer/simreg/`;
         const res = await firstValueFrom(this.http.post<any>(url, {
-          fullName: name.trim(),
+          fullName: cleanName,
           mobileNumber: phone
         }));
         if (res && res.status === 'success' && res.response) {
@@ -358,9 +360,12 @@ export class BillmexMockApi {
             localStorage.setItem('customer', JSON.stringify(res.response));
           }
           return { sent: true, customerId: res.response.id };
+        } else if (res && res.status === 'error') {
+          throw new Error(res.response || 'Customer registration failed.');
         }
-      } catch (e) {
-        console.warn('Live customerSimreg failed, falling back:', e);
+      } catch (e: any) {
+        const errorDetail = e?.error?.response || e?.error?.message || e?.message;
+        throw new Error(errorDetail || 'Failed to send OTP via Billmex API. Please verify backend connection.');
       }
     }
     return { sent: true };
@@ -369,67 +374,100 @@ export class BillmexMockApi {
   async customerVotp(phone: string, otp: string, name: string): Promise<Customer> {
     this.validatePhone(phone);
     if (!name.trim()) throw new Error('Enter your name to verify the OTP.');
+    const cleanOtp = otp.trim();
+    if (!cleanOtp) throw new Error('Enter the OTP sent to your mobile.');
 
-    if (otp !== '4829') {
-      if (!this.activeCustomer && typeof window !== 'undefined' && window.localStorage) {
+    if (!this.activeCustomer && typeof window !== 'undefined' && window.localStorage) {
+      const stored = localStorage.getItem('customer');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed?.id && parsed.id !== 'customer-1') {
+            this.activeCustomer = parsed;
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (!this.activeCustomer?.id && this.http) {
+      await this.customerSimreg(phone, name);
+    }
+
+    if (!this.activeCustomer?.id) {
+      throw new Error('Please click Send OTP first to request a verification code.');
+    }
+
+    if (this.http) {
+      let res: any;
+      try {
+        const url = `${getBaseApiUrl()}bhojmain/app/customer/votp`;
+        res = await firstValueFrom(this.http.post<any>(url, {
+          id: this.activeCustomer.id,
+          otp: cleanOtp
+        }));
+      } catch (e: any) {
+        const errorMsg = e?.error?.response || e?.error?.message || e?.message || "OTP doesn't match";
+        throw new Error(errorMsg);
+      }
+
+      if (res && res.status === 'success' && res.response) {
+        this.activeCustomer = res.response;
+        this.isLiveConnected = true;
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.setItem('customer', JSON.stringify(res.response));
+          localStorage.setItem('customerLoggedIn', 'true');
+        }
+        return {
+          id: res.response.id,
+          customerId: res.response.id,
+          name: res.response.fullName || name.trim(),
+          phone: res.response.mobileNumber || phone,
+          authkey: res.response.authkey || ''
+        };
+      }
+
+      if (res && (res.status === 'error' || res.response)) {
+        throw new Error(res.response || "OTP doesn't match");
+      }
+    }
+
+    throw new Error("OTP doesn't match");
+  }
+
+  async resendOtp(phoneOrCustomerId: string): Promise<{ sent: boolean }> {
+    let customerId = phoneOrCustomerId;
+    if (!phoneOrCustomerId || phoneOrCustomerId.length < 15) {
+      this.validatePhone(phoneOrCustomerId);
+      if (this.activeCustomer?.id) {
+        customerId = this.activeCustomer.id;
+      } else if (typeof window !== 'undefined' && window.localStorage) {
         const stored = localStorage.getItem('customer');
         if (stored) {
           try {
-            this.activeCustomer = JSON.parse(stored);
+            const parsed = JSON.parse(stored);
+            if (parsed?.id) customerId = parsed.id;
           } catch {
             // ignore
           }
         }
       }
-      if (!this.activeCustomer?.id && this.http) {
-        await this.customerSimreg(phone, name);
-      }
-      if (this.http && this.activeCustomer?.id) {
-        try {
-          const url = `${getBaseApiUrl()}bhojmain/app/customer/votp`;
-          const res = await firstValueFrom(this.http.post<any>(url, {
-            id: this.activeCustomer.id,
-            otp
-          }));
-          if (res && res.status === 'success' && res.response) {
-            this.activeCustomer = res.response;
-            this.isLiveConnected = true;
-            if (typeof window !== 'undefined' && window.localStorage) {
-              localStorage.setItem('customer', JSON.stringify(res.response));
-            }
-            return {
-              id: res.response.id,
-              customerId: res.response.id,
-              name: res.response.fullName || name.trim(),
-              phone: res.response.mobileNumber || phone,
-              authkey: res.response.authkey || 'mock-auth-key'
-            };
-          } else if (res && res.response) {
-            throw new Error(`${res.response}. Demo OTP is 4829.`);
-          }
-        } catch (e: any) {
-          const msg = e?.message || '';
-          throw new Error(msg.includes('Demo OTP is 4829') ? msg : `${msg ? msg + '. ' : ''}Demo OTP is 4829.`);
-        }
-      }
-      throw new Error('Demo OTP is 4829.');
     }
 
-    return {
-      ...MOCK_CUSTOMER,
-      name: name.trim(),
-      phone,
-    };
-  }
-
-  async resendOtp(phone: string): Promise<{ sent: boolean }> {
-    this.validatePhone(phone);
     if (this.http) {
       try {
-        const url = `${getBaseApiUrl()}bhojmain/app/customer/resendOtp/${phone}`;
-        await firstValueFrom(this.http.get<any>(url));
-      } catch (e) {
-        console.warn('Live resendOtp call failed:', e);
+        const headers = new HttpHeaders({ 'Content-Type': 'application/json' });
+        const url = `${getBaseApiUrl()}bhojmain/app/customer/resendOtp/${customerId}`;
+        const res = await firstValueFrom(this.http.get<any>(url, { headers }));
+        if (res && res.status === 'success') {
+          return { sent: true };
+        } else if (res && res.status === 'error') {
+          throw new Error(res.response || 'Failed to resend OTP.');
+        }
+      } catch (e: any) {
+        const msg = e?.error?.response || e?.error?.message || e?.message;
+        throw new Error(msg || 'Failed to resend OTP via Billmex API. Please verify backend connection.');
       }
     }
     return { sent: true };
@@ -459,7 +497,7 @@ export class BillmexMockApi {
     }
 
     if (customerId !== MOCK_CUSTOMER.customerId && customerId !== this.activeCustomer?.id) {
-      throw new Error('Customer was not found in the demo data.');
+      throw new Error('Customer was not found in records.');
     }
     return { ...MOCK_CUSTOMER };
   }
@@ -933,3 +971,8 @@ export class BillmexMockApi {
     if (!/^\d{10}$/.test(phone)) throw new Error('Enter a valid 10-digit phone number.');
   }
 }
+
+export const BillmexApi = BillmexMockApi;
+export type BillmexApi = BillmexMockApi;
+export { OtpService } from './otp.service';
+export type { OtpSendResponse, OtpVerifyResponse } from './otp.service';

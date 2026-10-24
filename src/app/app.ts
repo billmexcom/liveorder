@@ -12,6 +12,7 @@ import {
   type PaymentMethod,
   getMockMenuItems,
 } from './billmex-api';
+import { OtpService } from './otp.service';
 
 type Language = 'EN' | 'HI';
 type AppView = 'login' | 'menu' | 'checkout' | 'orders' | 'explore' | 'profile';
@@ -28,6 +29,8 @@ export interface CartItem {
   quantity: number;
   lineTotal: number;
 }
+
+type SpiceLevel = 'Normal' | 'Medium' | 'Spicy';
 
 @Component({
   selector: 'app-root',
@@ -53,28 +56,27 @@ export class App implements OnInit, OnDestroy {
   activeCategory = signal<string>('all');
 
   // Diner Details State (carried across screens)
-  userName = signal<string>('Vishnu');
-  phoneNumber = signal<string>('9669660675');
-  tableCode = signal<string>('M-04');
-  tableName = signal<string>('Grand Bay Bistro');
+  userName = signal<string>('');
+  phoneNumber = signal<string>('');
+  tableCode = signal<string>('T-01');
+  tableName = signal<string>('');
   deliveryAddress = signal<string>('Cyber City, Sec 4');
   
-  // Passcode 4 digits for Login screen
-  passcode = signal<string[]>(['4', '8', '2', '9']);
-  isAutoFilled = signal<boolean>(true);
+  // 6-digit OTP for Billmex verification
+  passcode = signal<string[]>(['', '', '', '', '', '']);
 
-  otpSent = signal<boolean>(false);
-  otpSending = signal<boolean>(false);
+  // Reactive state delegated to OtpService
+  otpSent = computed(() => this.otpService.otpSent());
+  otpSending = computed(() => this.otpService.isSending());
+  resendSeconds = computed(() => this.otpService.resendCooldown());
+  canResendOtp = computed(() => this.otpService.canResend());
+  formattedTimer = computed(() => this.otpService.formattedCooldown());
 
   // Scanner States
   isTorchOn = signal<boolean>(false);
   isScanning = signal<boolean>(true);
   isTableDetected = signal<boolean>(true);
   manualCodeMode = signal<boolean>(false);
-
-  // Resend Countdown Timer
-  resendSeconds = signal<number>(42);
-  private timerInterval: any = null;
 
   // Modals & Feedback
   toastMessage = signal<string | null>(null);
@@ -84,6 +86,10 @@ export class App implements OnInit, OnDestroy {
   showCartDrawer = signal<boolean>(false);
   showCustomizeModal = signal<boolean>(false);
   selectedCustomizeItem = signal<MenuItem | null>(null);
+  customizeSpice = signal<SpiceLevel>('Normal');
+  customizeRemark = signal<string>('');
+  itemCustomizations = signal<Record<string, { spiceLevel: SpiceLevel; remark: string }>>({});
+  readonly spiceLevels: readonly SpiceLevel[] = ['Normal', 'Medium', 'Spicy'];
 
   isLiveConnected = signal<boolean>(false);
   demoMode = computed(() => !this.isLiveConnected());
@@ -111,6 +117,8 @@ export class App implements OnInit, OnDestroy {
 
   // Menu Search Query
   searchQuery = signal<string>('');
+  isMenuSearchVisible = signal<boolean>(false);
+  profileInitial = computed(() => this.userName().trim().charAt(0).toUpperCase() || 'G');
 
   // Dynamic Menu Categories derived from loaded menu items
   categories = computed<MenuCategoryTab[]>(() => {
@@ -235,7 +243,7 @@ export class App implements OnInit, OnDestroy {
         list.push({
           item,
           quantity: qty,
-          lineTotal: item.price * qty,
+          lineTotal: item.price * qty
         });
       }
     }
@@ -260,20 +268,13 @@ export class App implements OnInit, OnDestroy {
     return Math.max(0, subtotal - discount);
   });
 
-  // Formatted countdown for Login Screen
-  formattedTimer = computed(() => {
-    const s = this.resendSeconds();
-    const mins = Math.floor(s / 60);
-    const secs = s % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}s`;
-  });
-
   // Translation Dictionaries
   t = computed(() => {
     const isHi = this.currentLang() === 'HI';
+    const storeName = this.tableName() || (isHi ? 'डिजिटल डाइनिंग' : 'Billmex Dining');
     return {
       brand: 'BHOJ × BILLMEX',
-      outletInfo: isHi ? 'ग्रैंड बे बिस्ट्रो • टेबल QR' : 'Grand Bay Bistro • Table QR',
+      outletInfo: `${storeName} • ${isHi ? 'टेबल QR' : 'Table QR'}`,
       langToggle: isHi ? 'EN / हिन्दी' : 'EN / हिन्दी',
       tag: isHi ? 'डाइन-इन डिजिटल ऑर्डरिंग' : 'DINE-IN DIGITAL ORDERING',
       heading: isHi ? 'ऑर्डर करने के लिए टेबल QR स्कैन करें' : 'Scan Table QR to Order',
@@ -281,28 +282,24 @@ export class App implements OnInit, OnDestroy {
         ? 'अपनी टेबल पर रखे स्टैंडी पर लगे QR कोड पर कैमरा ले जाएं' 
         : 'Point your camera at the QR standee on your table',
       detected: isHi 
-        ? `टेबल #${this.tableCode()} पहचानी गई • ${this.tableName()}` 
-        : `Table #${this.tableCode()} Detected • ${this.tableName()}`,
+        ? `टेबल #${this.tableCode()} पहचानी गई • ${storeName}`
+        : `Table #${this.tableCode()} Detected • ${storeName}`,
       torch: isHi ? 'टॉर्च' : 'Torch',
       uploadQr: isHi ? 'QR अपलोड' : 'Upload QR',
       enterCode: isHi ? 'कोड दर्ज करें:' : 'Enter Code:',
-      sectionTitle: isHi ? 'डाइनर विवरण और तत्काल सत्यापन' : 'DINER DETAILS & INSTANT VERIFICATION',
       tableBadge: `Table ${this.tableCode()}`,
-      nameLabel: isHi ? 'आपका नाम / उपनाम' : 'Your Name / Nickname',
-      mobileLabel: isHi ? 'मोबाइल नंबर (ऑर्डर बिल और ट्रैकिंग के लिए)' : 'Mobile Number (for order bill & tracking)',
+      namePlaceholder: isHi ? 'अपना नाम' : 'Your name',
+      mobilePlaceholder: isHi ? 'मोबाइल नंबर' : 'Mobile number',
       otpSent: isHi ? 'OTP भेजा गया' : 'OTP Sent',
-      passcodeLabel: isHi ? '4-अंकों का पासकोड दर्ज करें' : 'Enter 4-Digit Passcode',
-      autoFilled: isHi ? 'ऑटो-भरा गया' : 'Auto-Filled',
+      passcodeLabel: isHi ? '6-अंकों का OTP दर्ज करें' : 'Enter 6-Digit OTP',
       resendIn: isHi ? 'पुनः भेजें' : 'Resend in',
-      whatsappOtp: isHi ? 'WhatsApp OTP से भेजें' : 'Send via WhatsApp OTP',
-      confirmBtn: isHi ? 'टेबल कन्फर्म करें और डिजिटल मेनू देखें' : 'Confirm Table & View Digital Menu',
-      guestCheckout: isHi ? 'त्वरित अतिथि चेकआउट (साइन-इन छोड़ें)' : 'Quick Guest Checkout (Skip Sign-in)',
+      smsSendOtp: isHi ? 'SMS OTP भेजें' : 'SMS OTP',
+      whatsappSendOtp: isHi ? 'WhatsApp OTP भेजें' : 'WhatsApp OTP',
+      confirmBtn: isHi ? 'OTP सत्यापित करें और मेनू देखें' : 'Verify OTP & View Digital Menu',
       perk1: isHi ? 'कोई वेटर देरी नहीं • तत्काल ऑर्डरिंग' : 'Zero Waiter Delay • Instant Ordering',
       perk2: isHi ? 'डायरेक्ट किचन डिस्पैच' : 'Direct Kitchen Dispatch',
       footerTitle: isHi ? 'भोज गेस्ट डाइनिंग' : 'BHOJ GUEST DINING',
-      footerSubtitle: isHi 
-        ? `${this.tableName()} (टेबल ${this.tableCode()})` 
-        : `${this.tableName()} & Cafe (Table ${this.tableCode()})`,
+      footerSubtitle: `${storeName} (Table ${this.tableCode()})`,
       callWaiter: isHi ? 'वेटर को बुलाएं / सहायता' : 'Call Waiter / Support',
       dietary: isHi ? 'आहार और एलर्जी' : 'Dietary & Allergens',
       poweredBy: isHi ? 'BILLMEX द्वारा संचालित' : 'Powered by BILLMEX',
@@ -333,18 +330,23 @@ export class App implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
-    this.startTimer();
     void this.loadInitialData();
   }
 
-  ngOnDestroy(): void {
-    if (this.timerInterval) {
-      clearInterval(this.timerInterval);
-    }
-  }
+  ngOnDestroy(): void {}
 
   clearSearch(): void {
     this.searchQuery.set('');
+  }
+
+  toggleMenuSearch(): void {
+    const showSearch = !this.isMenuSearchVisible();
+    this.isMenuSearchVisible.set(showSearch);
+    if (showSearch && typeof document !== 'undefined') {
+      setTimeout(() => document.getElementById('menuSearchInput')?.focus());
+    } else {
+      this.clearSearch();
+    }
   }
 
   // User Profile Preferences & Rewards
@@ -355,6 +357,11 @@ export class App implements OnInit, OnDestroy {
 
   // View Switcher
   setView(view: AppView): void {
+    if (view !== 'login' && !this.customer()) {
+      this.showToast('⚠️ Please verify OTP with your mobile number first.');
+      this.activeView.set('login');
+      return;
+    }
     this.activeView.set(view);
     if (view === 'explore' || view === 'menu' || view === 'orders' || view === 'profile') {
       this.activeNavTab.set(view);
@@ -363,14 +370,26 @@ export class App implements OnInit, OnDestroy {
   }
 
   setNavTab(tab: 'explore' | 'menu' | 'orders' | 'profile'): void {
+    if (!this.customer()) {
+      this.showToast('⚠️ Please verify OTP with your mobile number first.');
+      this.activeView.set('login');
+      return;
+    }
+    if (tab !== 'menu') {
+      this.isMenuSearchVisible.set(false);
+      this.clearSearch();
+    }
     this.activeNavTab.set(tab);
     this.activeView.set(tab);
     void this.loadViewData(tab);
   }
 
   signOut(): void {
+    this.otpService.logout();
+    this.customer.set(null);
+    this.passcode.set(['', '', '', '', '', '']);
     this.activeView.set('login');
-    this.showToast('Session ended. Please scan Table QR.');
+    this.showToast('Signed out successfully. Please sign in with OTP.');
   }
 
   setOrderType(type: OrderType): void {
@@ -465,6 +484,11 @@ export class App implements OnInit, OnDestroy {
     if (next <= 0) {
       delete quantities[matchedKey];
       delete quantities[item.id];
+      this.itemCustomizations.update((customizations) => {
+        const updated = { ...customizations };
+        delete updated[item.id];
+        return updated;
+      });
       this.showToast(`Removed ${item.name} from cart`);
     } else {
       delete quantities[matchedKey];
@@ -507,11 +531,15 @@ export class App implements OnInit, OnDestroy {
 
   clearCart(): void {
     this.cartQuantities.set({});
+    this.itemCustomizations.set({});
     this.showToast('Cart cleared');
   }
 
   openCustomize(item: MenuItem): void {
+    const customization = this.itemCustomizations()[item.id];
     this.selectedCustomizeItem.set(item);
+    this.customizeSpice.set(customization?.spiceLevel ?? 'Normal');
+    this.customizeRemark.set(customization?.remark ?? '');
     this.showCustomizeModal.set(true);
   }
 
@@ -523,6 +551,13 @@ export class App implements OnInit, OnDestroy {
   saveCustomization(): void {
     const item = this.selectedCustomizeItem();
     if (item) {
+      this.itemCustomizations.update((customizations) => ({
+        ...customizations,
+        [item.id]: {
+          spiceLevel: this.customizeSpice(),
+          remark: this.customizeRemark().trim()
+        }
+      }));
       this.addToCart(item);
       this.closeCustomize();
     }
@@ -555,10 +590,25 @@ export class App implements OnInit, OnDestroy {
 
   async confirmPayment(): Promise<void> {
     if (this.apiLoading()) return;
-    const items = this.cartItems().map((ci) => ({
-      itemId: ci.item.id,
-      quantity: ci.quantity
-    }));
+    const items = this.cartItems().map((ci) => {
+      const customization = this.itemCustomizations()[ci.item.id];
+      return {
+        itemId: ci.item.id,
+        quantity: ci.quantity,
+        ...(customization ? customization : {})
+      };
+    });
+    const orderRemark = this.cartItems()
+      .flatMap((ci) => {
+        const customization = this.itemCustomizations()[ci.item.id];
+        if (!customization) return [];
+        const details = [
+          `${customization.spiceLevel} spice`,
+          customization.remark
+        ].filter(Boolean);
+        return details.length ? [`${ci.item.name}: ${details.join(', ')}`] : [];
+      })
+      .join('; ');
     if (items.length === 0) {
       this.showToast('⚠️ Please add at least 1 item to cart.');
       return;
@@ -576,6 +626,7 @@ export class App implements OnInit, OnDestroy {
         couponCode: this.isCouponApplied() ? this.couponCode() : '',
         tableCode: this.tableCode(),
         deliveryAddress: this.deliveryTerminal(),
+        orderRemark,
       });
 
       if (this.paymentMethod() === 'upi') {
@@ -590,6 +641,7 @@ export class App implements OnInit, OnDestroy {
       await this.refreshNotifications();
       this.orderPlacedSuccess.set(true);
       this.cartQuantities.set({});
+      this.itemCustomizations.set({});
 
       const isLive = !order.id.startsWith('BH-');
       this.showToast(isLive ? `🎉 Order #${order.id.slice(-6).toUpperCase()} placed with kitchen!` : `Order #${order.id} confirmed!`);
@@ -647,136 +699,194 @@ export class App implements OnInit, OnDestroy {
     }
   }
 
-  startTimer(): void {
-    if (this.timerInterval) clearInterval(this.timerInterval);
-    this.timerInterval = setInterval(() => {
-      this.resendSeconds.update((s) => (s > 0 ? s - 1 : 0));
-    }, 1000);
-  }
-
   onPhoneChange(val: string): void {
-    const cleaned = val.replace(/\D/g, '').slice(0, 10);
+    const cleaned = (val || '').replace(/\D/g, '').slice(0, 10);
     this.phoneNumber.set(cleaned);
-    if (this.otpSent()) {
-      this.otpSent.set(false);
+    if (this.otpService.otpSent() && cleaned !== this.otpService.lastPhone()) {
+      this.otpService.resetOtpState();
+      this.passcode.set(['', '', '', '', '', '']);
     }
-  }
-
-  fillDemoOtp(): void {
-    this.passcode.set(['4', '8', '2', '9']);
-    this.isAutoFilled.set(true);
-    this.showToast('Demo OTP 4829 filled.');
   }
 
   clearOtp(): void {
-    this.passcode.set(['', '', '', '']);
-    this.isAutoFilled.set(false);
-    const firstInput = document.getElementById('otp-input-0') as HTMLInputElement;
-    if (firstInput) firstInput.focus();
+    this.passcode.set(['', '', '', '', '', '']);
+    if (typeof document !== 'undefined') {
+      const firstInput = document.getElementById('otp-input-0') as HTMLInputElement;
+      if (firstInput) {
+        firstInput.focus();
+        firstInput.select();
+      }
+    }
   }
 
-  async sendOtp(): Promise<void> {
+  async sendOtp(channel: 'sms' | 'whatsapp' = 'sms'): Promise<void> {
     const phone = this.phoneNumber().trim();
-    if (!/^\d{10}$/.test(phone)) {
-      this.showToast('⚠️ Please enter a valid 10-digit mobile number.');
+    const phoneCheck = this.otpService.validatePhoneNumber(phone);
+    if (!phoneCheck.valid) {
+      this.showToast(`⚠️ ${phoneCheck.error}`);
       return;
     }
     const name = this.userName().trim() || 'Guest Diner';
-    this.otpSending.set(true);
     this.apiError.set(null);
     try {
-      await this.api.customerSimreg(phone, name);
-      this.otpSent.set(true);
-      this.resendSeconds.set(45);
-      this.startTimer();
-      if (this.api.isLiveConnected) {
-        this.showToast(`✅ Live OTP sent to +91 ${phone}`);
-      } else {
-        this.showToast(`Demo OTP is 4829. Sent to +91 ${phone}`);
+      const res = await this.otpService.sendOtp(phoneCheck.cleaned, name, channel);
+      this.showToast(`✅ ${res.message}`);
+      if (typeof document !== 'undefined') {
+        setTimeout(() => {
+          const firstInput = document.getElementById('otp-input-0') as HTMLInputElement;
+          if (firstInput) {
+            firstInput.focus();
+            firstInput.select();
+          }
+        }, 150);
       }
-      setTimeout(() => {
-        const firstInput = document.getElementById('otp-input-0') as HTMLInputElement;
-        if (firstInput) firstInput.focus();
-      }, 150);
     } catch (err: any) {
       this.reportApiError(err);
-    } finally {
-      this.otpSending.set(false);
     }
   }
 
-  resendOtp(): void {
-    if (this.resendSeconds() === 0) {
-      void this.requestResendOtp();
+  async resendOtp(): Promise<void> {
+    if (!this.canResendOtp()) {
+      if (this.resendSeconds() > 0) {
+        this.showToast(`⏳ Please wait ${this.resendSeconds()}s before resending.`);
+      }
+      return;
+    }
+    const phone = this.phoneNumber().trim();
+    const name = this.userName().trim() || 'Guest Diner';
+    try {
+      const res = await this.otpService.resendOtp(phone, name, this.otpService.lastChannel());
+      this.showToast(`✅ ${res.message}`);
+    } catch (err: any) {
+      this.reportApiError(err);
     }
   }
 
-  sendWhatsAppOtp(): void {
-    void this.sendOtp();
+  async sendWhatsAppOtp(): Promise<void> {
+    await this.sendOtp('whatsapp');
   }
 
-  handleDigitInput(event: any, index: number): void {
+  handleDigitInput(event: Event, index: number): void {
     const input = event.target as HTMLInputElement;
-    const val = input.value.slice(-1);
-    
-    const current = [...this.passcode()];
-    current[index] = val;
-    this.passcode.set(current);
-    this.isAutoFilled.set(false);
+    const rawVal = input.value || '';
+    const digitsOnly = rawVal.replace(/\D/g, '');
 
-    if (val && index < 3) {
+    // Support paste or multiple characters typed
+    if (digitsOnly.length > 1) {
+      this.distributeOtpDigits(digitsOnly, index);
+      return;
+    }
+
+    const digit = digitsOnly.slice(-1);
+    const current = [...this.passcode()];
+    current[index] = digit;
+    this.passcode.set(current);
+    input.value = digit;
+
+    if (digit && index < 5 && typeof document !== 'undefined') {
       const nextInput = document.getElementById(`otp-input-${index + 1}`) as HTMLInputElement;
-      if (nextInput) nextInput.focus();
+      if (nextInput) {
+        nextInput.focus();
+        nextInput.select();
+      }
+    }
+  }
+
+  handlePaste(event: ClipboardEvent): void {
+    event.preventDefault();
+    const pasted = event.clipboardData?.getData('text') || '';
+    const digits = pasted.replace(/\D/g, '').slice(0, 6);
+    if (digits) {
+      this.distributeOtpDigits(digits, 0);
+    }
+  }
+
+  private distributeOtpDigits(digitsStr: string, startIndex: number = 0): void {
+    const digits = digitsStr.split('');
+    const current = [...this.passcode()];
+    for (let i = 0; i < digits.length && (startIndex + i) < 6; i++) {
+      current[startIndex + i] = digits[i];
+    }
+    this.passcode.set(current);
+
+    if (typeof document !== 'undefined') {
+      const targetIdx = Math.min(startIndex + digits.length, 5);
+      const targetInput = document.getElementById(`otp-input-${targetIdx}`) as HTMLInputElement;
+      if (targetInput) {
+        targetInput.focus();
+        targetInput.select();
+      }
     }
   }
 
   handleDigitKeyDown(event: KeyboardEvent, index: number): void {
     if (event.key === 'Backspace') {
       const current = [...this.passcode()];
-      if (!current[index] && index > 0) {
+      if (current[index]) {
+        current[index] = '';
+        this.passcode.set(current);
+      } else if (index > 0 && typeof document !== 'undefined') {
+        current[index - 1] = '';
+        this.passcode.set(current);
         const prevInput = document.getElementById(`otp-input-${index - 1}`) as HTMLInputElement;
         if (prevInput) {
           prevInput.focus();
-          const prevArray = [...this.passcode()];
-          prevArray[index - 1] = '';
-          this.passcode.set(prevArray);
+          prevInput.select();
         }
-      } else {
-        current[index] = '';
-        this.passcode.set(current);
+      }
+    } else if (event.key === 'ArrowLeft' && index > 0 && typeof document !== 'undefined') {
+      const prevInput = document.getElementById(`otp-input-${index - 1}`) as HTMLInputElement;
+      if (prevInput) prevInput.focus();
+    } else if (event.key === 'ArrowRight' && index < 5 && typeof document !== 'undefined') {
+      const nextInput = document.getElementById(`otp-input-${index + 1}`) as HTMLInputElement;
+      if (nextInput) nextInput.focus();
+    } else if (event.key === 'Enter') {
+      const otpCode = this.passcode().join('').trim();
+      if (otpCode.length === 6) {
+        void this.confirmAndOpenMenu();
       }
     }
   }
 
   async confirmAndOpenMenu(): Promise<void> {
-    if (this.apiLoading()) return;
+    if (this.apiLoading() || this.otpService.isVerifying()) return;
+    const phone = this.phoneNumber().trim();
+    const phoneCheck = this.otpService.validatePhoneNumber(phone);
+    if (!phoneCheck.valid) {
+      this.showToast(`⚠️ ${phoneCheck.error}`);
+      return;
+    }
+    const otpCode = this.passcode().join('').trim();
+    if (!otpCode || otpCode.length !== 6) {
+      this.showToast('⚠️ Please enter the complete 6-digit OTP code.');
+      return;
+    }
     this.apiLoading.set(true);
     this.apiError.set(null);
     try {
-      const customer = await this.api.customerVotp(
-        this.phoneNumber(),
-        this.passcode().join(''),
-        this.userName(),
+      const customer = await this.otpService.verifyOtp(
+        otpCode,
+        phoneCheck.cleaned,
+        this.userName().trim() || 'Customer',
       );
       this.customer.set(customer);
-      this.userName.set(customer.name);
-      await this.api.getCustomerInfoById(customer.customerId);
-      await this.api.registerPushToken(customer.customerId, 'demo-fcm-token');
+      if (customer.name) this.userName.set(customer.name);
+      try {
+        await this.api.getCustomerInfoById(customer.customerId);
+        await this.api.registerPushToken(customer.customerId, `fcm-token-${Date.now()}`);
+      } catch (e) {
+        console.warn('Customer info / token registration sync:', e);
+      }
+      this.isLiveConnected.set(true);
       this.showSuccessModal.set(false);
       this.activeView.set('menu');
       this.activeNavTab.set('menu');
-      this.showToast('Welcome to Grand Bay Bistro. Demo session verified.');
+      this.showToast(`✅ Welcome, ${customer.name}! Session verified.`);
     } catch (error) {
       this.reportApiError(error);
     } finally {
       this.apiLoading.set(false);
     }
-  }
-
-  guestCheckout(): void {
-    this.activeView.set('menu');
-    this.activeNavTab.set('menu');
-    this.showToast('🚀 Proceeding as Guest on Table ' + this.tableCode());
   }
 
   callWaiter(): void {
@@ -798,17 +908,24 @@ export class App implements OnInit, OnDestroy {
 
   private async loadInitialData(): Promise<void> {
     try {
-      let posId = 'POS-DEMO';
+      let posId: string = BILLMEX_LIVE_CONFIG.defaultPosId;
       if (typeof window !== 'undefined' && window.location) {
-        const isLiveHost = window.location.port === '4200' || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname) || window.location.search.includes('posId');
-        if (isLiveHost) {
-          const params = new URLSearchParams(window.location.search);
-          posId = params.get('posId') || BILLMEX_LIVE_CONFIG.defaultPosId;
+        const params = new URLSearchParams(window.location.search);
+        posId = params.get('posId') || BILLMEX_LIVE_CONFIG.defaultPosId;
+        const queryTable = params.get('table') || params.get('tableCode') || params.get('tableNo');
+        if (queryTable) {
+          this.tableCode.set(queryTable);
         }
       }
       const posData = await this.api.getPosData(posId);
-      if (posData?.name && posData.name !== 'Grand Bay Bistro') {
+      if (posData?.name) {
         this.tableName.set(posData.name);
+      }
+      const storedCustomer = this.otpService.activeCustomer();
+      if (storedCustomer) {
+        this.customer.set(storedCustomer);
+        if (storedCustomer.name) this.userName.set(storedCustomer.name);
+        if (storedCustomer.phone) this.phoneNumber.set(storedCustomer.phone);
       }
       this.isLiveConnected.set(this.api.isLiveConnected);
       await this.loadMenu();
@@ -830,8 +947,6 @@ export class App implements OnInit, OnDestroy {
       }
       if (view === 'profile') {
         await this.refreshNotifications();
-        const customer = this.customer();
-        if (customer) this.customer.set(await this.api.getCustomerInfoById(customer.customerId));
       }
     } catch (error) {
       this.reportApiError(error);
@@ -850,39 +965,14 @@ export class App implements OnInit, OnDestroy {
     this.notifications.set(await this.api.getNotifications());
   }
 
-  private async requestOtp(): Promise<void> {
-    try {
-      await this.api.customerSimreg(this.phoneNumber(), this.userName());
-      if (this.api.isLiveConnected) {
-        this.showToast('✅ Live OTP sent to ' + this.phoneNumber());
-      } else {
-        this.showToast('Demo OTP is 4829. No SMS was sent.');
-      }
-    } catch (error) {
-      this.reportApiError(error);
-    }
-  }
-
-  private async requestResendOtp(): Promise<void> {
-    try {
-      await this.api.resendOtp(this.phoneNumber());
-      this.resendSeconds.set(45);
-      this.startTimer();
-      if (this.api.isLiveConnected) {
-        this.showToast('✅ Resent OTP to ' + this.phoneNumber());
-      } else {
-        this.showToast('Demo OTP is 4829. No SMS was sent.');
-      }
-    } catch (error) {
-      this.reportApiError(error);
-    }
-  }
-
   private reportApiError(error: unknown): void {
-    const message = error instanceof Error ? error.message : 'The demo API request failed.';
+    const message = error instanceof Error ? error.message : 'API request failed.';
     this.apiError.set(message);
     this.showToast(message);
   }
 
-  constructor(private readonly api: BillmexMockApi) {}
+  constructor(
+    private readonly api: BillmexMockApi,
+    readonly otpService: OtpService
+  ) {}
 }
